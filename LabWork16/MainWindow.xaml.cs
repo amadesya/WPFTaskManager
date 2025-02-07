@@ -1,7 +1,5 @@
-﻿using System.IO;
+﻿using System.Diagnostics;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Media.Imaging;
 
 namespace LabWork16
 {
@@ -10,98 +8,128 @@ namespace LabWork16
         public MainWindow()
         {
             InitializeComponent();
+            LoadProcesses();
+            LoadApplications();
         }
 
-        private void SelectFolderButton_Click(object sender, RoutedEventArgs e)
+        public class ProcessInfo
         {
-            string filePath = FolderPathTextBox.Text;
-            if (File.Exists(filePath))
+            public string ProcessName { get; set; }
+            public int Id { get; set; }
+            public string MemoryUsage { get; set; }
+        }
+
+        public class ApplicationInfo
+        {
+            public string Title { get; set; }
+            public string StartTime { get; set; }
+        }
+
+        private void LoadProcesses()
+        {
+            ProcessesListView.Items.Clear();
+            var processes = Process.GetProcesses()
+                .Select(p => new ProcessInfo
+                {
+                    ProcessName = p.ProcessName,
+                    Id = p.Id,
+                    MemoryUsage = $"{p.WorkingSet64 / 1024 / 1024} MB"
+                }).ToList();
+
+            foreach (var process in processes)
+            {
+                ProcessesListView.Items.Add(process);
+            }
+
+            StatusTextBlock.Text = $"Процессов: {ProcessesListView.Items.Count}";
+        }
+
+        private void LoadApplications()
+        {
+            ApplicationsListView.Items.Clear();
+            var applications = Process.GetProcesses()
+                .Where(p => !string.IsNullOrWhiteSpace(p.MainWindowTitle))
+                .Select(p => new ApplicationInfo
+                {
+                    Title = p.MainWindowTitle,
+                    StartTime = p.StartTime.ToString()
+                }).ToList();
+
+            foreach (var app in applications)
+            {
+                ApplicationsListView.Items.Add(app);
+            }
+        }
+
+        private void RefreshProcesses_Click(object sender, RoutedEventArgs e)
+        {
+            LoadProcesses();
+            LoadApplications();
+        }
+
+        private void EndTask_Click(object sender, RoutedEventArgs e)
+        {
+            if (ProcessesListView.SelectedItem is ProcessInfo selectedProcess)
             {
                 try
                 {
-                    var bitmap = new BitmapImage(new Uri(filePath));
-                    Image.Source = bitmap;
-                    this.Title = System.IO.Path.GetFileName(filePath);
-                    FolderPathTextBox.Text = $"{bitmap.PixelWidth} x {bitmap.PixelHeight}";
+                    Process process = Process.GetProcessById(selectedProcess.Id);
+                    process.Kill();
+                    process.WaitForExit(); 
+                    LoadProcesses(); 
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка открытия изображения: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Ошибка завершения процесса: {ex.Message}");
                 }
-            }
-            else
-            {
-                MessageBox.Show("Файл не найден или путь указан неверно.", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
 
-
-        private void OpenMenuItem_Click(object sender, RoutedEventArgs e)
+        private void KillProcessTree_Click(object sender, RoutedEventArgs e)
         {
-            Microsoft.Win32.OpenFileDialog openFileDialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Filter = "Image files (*.bmp;*.jpg;*.jpeg;*.png)|*.bmp;*.jpg;*.jpeg;*.png"
-            };
-            if (openFileDialog.ShowDialog() == true)
+            if (ProcessesListView.SelectedItem is ProcessInfo selectedProcess)
             {
                 try
                 {
-                    var filePath = openFileDialog.FileName;
-                    var bitmap = new BitmapImage(new Uri(filePath));
-                    Image.Source = bitmap;
-                    ImageScaleTransform.ScaleX = 1;
-                    ImageScaleTransform.ScaleY = 1;
-                    this.Title = System.IO.Path.GetFileName(filePath);
-                    var fileInfo = new FileInfo(filePath);
-                    long fileSizeInKb = fileInfo.Length / 1024;
-                    FolderPathTextBox.Text = $"{bitmap.PixelWidth} x {bitmap.PixelHeight}, {fileSizeInKb} KB";
+                    Process process = Process.GetProcessById(selectedProcess.Id);
+                    process.Kill(true); 
+                    process.WaitForExit();
+                    LoadProcesses();
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка открытия изображения: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Ошибка завершения дерева процессов: {ex.Message}");
                 }
             }
         }
 
-
-
-
-        private void ExitMenuItem_Click(object sender, RoutedEventArgs e)
+        private void ShowNewTaskPanel(object sender, RoutedEventArgs e)
         {
-            this.Close();
-        }
-
-
-        private void ScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            if (ImageScaleTransform != null)
+            var newTaskWindow = new NewTaskWindow();
+            if (newTaskWindow.ShowDialog() == true) 
             {
-                double scale = e.NewValue; 
-                ImageScaleTransform.ScaleX = scale;
-                ImageScaleTransform.ScaleY = scale;
-                ScalePercentageTextBlock.Text = $"{(int)(scale * 100)}%";
-                //UpdateScrollViewerVisibility();
+                try
+                {
+
+                    string processName = newTaskWindow.TaskName;
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = processName,
+                        UseShellExecute = true
+                    };
+                    Process.Start(startInfo); 
+                    LoadProcesses(); 
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка запуска задачи: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
         }
-        //Тут реализовано появление ScrollBar когда изображение слишком велико или сильно приближено
-        //Иногда багует и изображение подгружается не полностью
 
-        //private void UpdateScrollViewerVisibility()
-        //{
-        //    if (Image.Source is BitmapImage bitmap)
-        //    {
-        //        double scaledWidth = bitmap.PixelWidth * ImageScaleTransform.ScaleX;
-        //        double scaledHeight = bitmap.PixelHeight * ImageScaleTransform.ScaleY;
-        //        double viewerWidth = ImageScrollViewer.ActualWidth;
-        //        double viewerHeight = ImageScrollViewer.ActualHeight;
-        //        ImageScrollViewer.HorizontalScrollBarVisibility = scaledWidth > viewerWidth
-        //            ? ScrollBarVisibility.Auto
-        //            : ScrollBarVisibility.Disabled;
-        //        ImageScrollViewer.VerticalScrollBarVisibility = scaledHeight > viewerHeight
-        //            ? ScrollBarVisibility.Auto
-        //            : ScrollBarVisibility.Disabled;
-        //    }
-        //}
-
+        private void Exit_Click(object sender, RoutedEventArgs e)
+        {
+            Application.Current.Shutdown();
+        }
     }
 }
